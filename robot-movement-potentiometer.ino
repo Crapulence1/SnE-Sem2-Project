@@ -1,5 +1,7 @@
 volatile int currentSpeed = 0;
 int frequency = 60;
+int accel = 2;  //acceleration speed (constant)
+int targetSpeed;
 
 void setup()
 {
@@ -26,9 +28,11 @@ void loop()
   digitalWrite(8, LOW);
   digitalWrite(12, HIGH);
   
-  int targetSpeed = analogRead(A5) / 4; //range 0-255
   
-  int accel = 2;  //acceleration speed (constant)
+  
+  targetSpeed = analogRead(A5) / 4; //range 0-255
+  
+  
   if(currentSpeed < targetSpeed) {  //accelerate
     currentSpeed += accel;
     if(currentSpeed > targetSpeed) {//prevents overshooting speed
