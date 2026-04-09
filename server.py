@@ -1,6 +1,8 @@
 import RPi.GPIO as GPIO
 import time
 import socket
+from picamera2 import Picamera2
+from datetime import datetime
 
 # HOST = "localhost" # Localhost connection
 HOST = "jerry.local" # Jerry Connection
@@ -24,6 +26,11 @@ BN22 = 16
 
 # Sets up servo control pin
 SERVO = 19
+
+# Initializes and starts camera
+picam2 = Picamera2()
+picam2.start()
+
 
 #Default states of all controls
 left_trigger = -1.0
@@ -263,6 +270,11 @@ def move_motors():
             print("servo angle", servo_angle, "degrees")
         else:
             servo1.ChangeDutyCycle(0)
+
+    elif current_input == "take_picture":
+        now = datetime.now()
+        current_time = now.strftime("%Y%m%d%H%M%S")
+        picam2.capture_file(f"{current_time}.jpg")
 
 try:
     while True:

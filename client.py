@@ -72,6 +72,9 @@ while running:
                 running = False
                 current_input = "end"
 
+            elif event.button == 2:
+                current_input = "take_picture"
+
         elif event.type == pygame.JOYHATMOTION:
             # Dpad
             current_input = "dpad"
