@@ -4,18 +4,17 @@ import pygame
 pygame.init()
 pygame.joystick.init()
 
-# Check if a controller is connected
+# Verify controller connectivity
 if pygame.joystick.get_count() == 0:
     print("No controller connected.")
     quit()
 
-# Get the first Joystick
 joystick = pygame.joystick.Joystick(0)
-joystick.init()
+#joystick.init()
 
-# HOST= "localhost" # Localhost Connection
-HOST = "172.20.10.6" # Jerry connection
-PORT = 9999
+# --- NETWORK CONFIGURATION ---
+HOST = "172.20.10.4"  # Raspberry Pi IP Address (or "jerry.local")
+PORT = 9999           # Target UDP Port on the Pi
 
 current_input = ""
 value = ""
@@ -26,69 +25,60 @@ client.settimeout(0.05)
 client.sendto("Hello".encode("utf-8"), (HOST, PORT))
 
 clock = pygame.time.Clock()
-
 running = True
+
+print("Controller interface online. Relay active...")
+
+# --- MAIN CONTROLLER LOOP ---
 while running:
     for event in pygame.event.get():
-
         if event.type == pygame.JOYAXISMOTION:
-
             # Left Stick x-axis
             if event.axis == 0:
                 current_input = "left_stick"
-                if abs(event.value) > 0.05:
-                    value = round(event.value, 2)
-                else:
-                    value = 0
+                value = round(event.value, 2) if abs(event.value) > 0.05 else 0
 
             # Right Stick x-axis
             elif event.axis == 2:
                 current_input = "right_stick"
-                if abs(event.value) > 0.05:
-                    value = round(event.value, 2)
-                else:
-                    value = 0
+                value = round(event.value, 2) if abs(event.value) > 0.05 else 0
 
-            # Left Trigger, axis 4 on windows pc, axis 2 on raspberry pi
+            # Left Trigger
             elif event.axis == 4:
                 current_input = "left_trigger"
-                if event.value <= -0.9:
-                    value = -1.0
-                else:
-                    value = event.value
+                value = -1.0 if event.value <= -0.9 else event.value
 
             # Right trigger
             elif event.axis == 5:
                 current_input = "right_trigger"
-                if event.value <= -0.9:
-                    value = -1.0
-                else:
-                    value = event.value
+                value = -1.0 if event.value <= -0.9 else event.value
 
         elif event.type == pygame.JOYBUTTONUP:
-
-            # Ends program
+            # Button 0 ends the program
             if event.button == 0:
                 running = False
                 current_input = "end"
-
-            elif event.button == 2:
-                current_input = "take_picture"
+                value = ""
 
         elif event.type == pygame.JOYHATMOTION:
-            # Dpad
+            # Dpad Movement
             current_input = "dpad"
-            dpad = event.value
-            x, y = dpad
+            x, y = event.value
             value = f"{x} {y}"
 
+        # Construct and send command package to the Pi
         message = f"{current_input} {value}"
         client.sendto(message.encode("utf-8"), (HOST, PORT))
 
+    # Listen for acknowledgment from the Pi without freezing the UI
     try:
-        print(f"{message}, {client.recv(1024).decode("utf-8")}")
+        ack = client.recv(1024).decode('utf-8')
+        print(f"Sent: {message} | Reply: {ack}")
     except socket.timeout:
-        print("No response")
+        pass
+
     clock.tick(60)
-    if current_input == "end":
-        client.close()
+
+# Clean up connections on exit
+client.close()
+print("Client shutdown complete.")

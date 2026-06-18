@@ -2,17 +2,22 @@ import RPi.GPIO as GPIO
 import time
 import socket
 from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FfmpegOutput
 from datetime import datetime
+import libcamera
 
-# HOST = "localhost" # Localhost connection
-HOST = "jerry.local" # Jerry Connection
-PORT = 9999 # Port used for TCP/UDP
+# --- NETWORK CONFIGURATION ---
+HOST = "jerry.local"  # Local hostname or Pi IP address
+PORT = 9999  # Port used for UDP controller commands
+REMOTE_IP = "172.20.10.7"  # Your PC's IP address (where VLC is running)
 
+# Setup UDP Server for receiving controller inputs
 server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((HOST, PORT))
 
-# Sets up all motor control pins
+# --- MOTOR & SERVO GPIO PIN DEFINITIONS ---
 NSLEEP1 = 12
 AN11 = 17
 AN12 = 27
@@ -23,16 +28,25 @@ AN21 = 24
 AN22 = 25
 BN21 = 26
 BN22 = 16
-
-# Sets up servo control pin
 SERVO = 19
 
-# Initializes and starts camera
+# --- PICAMERA2 LIVE VLC STREAM CONFIGURATION ---
 picam2 = Picamera2()
+config = picam2.create_video_configuration(main={"size": (1280, 720)}, transform=libcamera.Transform(vflip=1))  # 720p HD stream
+picam2.configure(config)
+
+# Setup H264 Encoder for the live network stream
+stream_encoder = H264Encoder(bitrate=5000000)  # 5 Mbps bandwidth allocation
+
+# Wrap the stream in an MPEG-TS container and broadcast via UDP to the PC on port 5000
+vlc_stream_output = FfmpegOutput(f"-f mpegts udp://{REMOTE_IP}:5000?pkt_size=1316")
+
+# Start camera and begin continuous streaming to VLC immediately
 picam2.start()
+picam2.start_recording(stream_encoder, vlc_stream_output)
+print(f"Live stream broadcasting to VLC at udp://{REMOTE_IP}:5000")
 
-
-#Default states of all controls
+# --- DEFAULT CONTROL STATES ---
 left_trigger = -1.0
 right_trigger = -1.0
 left_stick_x = 0.0
@@ -40,60 +54,45 @@ right_stick_x = 0.0
 dpad = (0, 0)
 
 current_input = ""
-previous_dpad= (0, 0)
+previous_dpad = (0, 0)
 
-# sets up GPIO pins for motor control and starts PWM
-GPIO.setmode(GPIO.BCM) # Mode is BCM so remember for future connections
-GPIO.setup(NSLEEP1,GPIO.OUT)
-GPIO.setup(NSLEEP2,GPIO.OUT)
-GPIO.setup(AN11,GPIO.OUT)
-GPIO.setup(AN12,GPIO.OUT)
-GPIO.setup(BN11,GPIO.OUT)
-GPIO.setup(BN12,GPIO.OUT)
-GPIO.setup(AN21,GPIO.OUT)
-GPIO.setup(AN22,GPIO.OUT)
-GPIO.setup(BN21,GPIO.OUT)
-GPIO.setup(BN22,GPIO.OUT)
-GPIO.setup(SERVO,GPIO.OUT)
-GPIO.output(AN11,GPIO.LOW)
-GPIO.output(AN12,GPIO.LOW)
-GPIO.output(BN11,GPIO.LOW)
-GPIO.output(BN12,GPIO.LOW)
-GPIO.output(AN21,GPIO.LOW)
-GPIO.output(AN22,GPIO.LOW)
-GPIO.output(BN21,GPIO.LOW)
-GPIO.output(BN22,GPIO.LOW)
-p1=GPIO.PWM(NSLEEP1,200)
-p2=GPIO.PWM(NSLEEP2,200)
+# --- GPIO SETUP ---
+GPIO.setmode(GPIO.BCM)
+for pin in [NSLEEP1, NSLEEP2, AN11, AN12, BN11, BN12, AN21, AN22, BN21, BN22, SERVO]:
+    GPIO.setup(pin, GPIO.OUT)
+    if pin != NSLEEP1 and pin != NSLEEP2 and pin != SERVO:
+        GPIO.output(pin, GPIO.LOW)
+
+p1 = GPIO.PWM(NSLEEP1, 200)
+p2 = GPIO.PWM(NSLEEP2, 200)
 p1.start(0)
 p2.start(0)
 
-# Sets up GPIO pins for Servo control and starts PWM
 servo1 = GPIO.PWM(SERVO, 50)
-servo1.start(7) # Starts at 90 degrees
-time.sleep(0.35) # Time to get to 90 degree position
-servo1.ChangeDutyCycle(0) # Turns off servo motor
+servo1.start(7)  # Starts at 90 degrees
+time.sleep(0.35)
+servo1.ChangeDutyCycle(0)
 
-# Default states for servo motor
 servo_angle = 90
 last_servo_angle = 90
-
-# Variables to make code easier to read/write
 forward = True
 backward = False
 
-# Sets speed of left and right wheels, range 0-100
+
+# --- MOTOR CONTROL HELPER FUNCTIONS ---
 def set_left_speed(speed):
     p1.ChangeDutyCycle(speed)
+
+
 def set_right_speed(speed):
     p2.ChangeDutyCycle(speed)
 
-# Sets speed of all wheels
+
 def set_speed(speed):
     p1.ChangeDutyCycle(speed)
     p2.ChangeDutyCycle(speed)
 
-# Individual wheel direction control
+
 def front_right(direction):
     if direction == backward:
         GPIO.output(AN11, GPIO.HIGH)
@@ -101,6 +100,8 @@ def front_right(direction):
     if direction == forward:
         GPIO.output(AN11, GPIO.LOW)
         GPIO.output(AN12, GPIO.HIGH)
+
+
 def back_right(direction):
     if direction == forward:
         GPIO.output(BN11, GPIO.HIGH)
@@ -108,6 +109,8 @@ def back_right(direction):
     if direction == backward:
         GPIO.output(BN11, GPIO.LOW)
         GPIO.output(BN12, GPIO.HIGH)
+
+
 def front_left(direction):
     if direction == forward:
         GPIO.output(AN21, GPIO.HIGH)
@@ -115,6 +118,8 @@ def front_left(direction):
     if direction == backward:
         GPIO.output(AN21, GPIO.LOW)
         GPIO.output(AN22, GPIO.HIGH)
+
+
 def back_left(direction):
     if direction == backward:
         GPIO.output(BN21, GPIO.HIGH)
@@ -123,7 +128,7 @@ def back_left(direction):
         GPIO.output(BN21, GPIO.LOW)
         GPIO.output(BN22, GPIO.HIGH)
 
-# Left/right Wheel direction control
+
 def left_wheels(direction):
     if direction == forward:
         front_left(forward)
@@ -131,6 +136,8 @@ def left_wheels(direction):
     else:
         front_left(backward)
         back_left(backward)
+
+
 def right_wheels(direction):
     if direction == forward:
         front_right(forward)
@@ -139,7 +146,7 @@ def right_wheels(direction):
         front_right(backward)
         back_right(backward)
 
-# Forward/Backward movement
+
 def straight(direction):
     if direction == forward:
         left_wheels(forward)
@@ -148,32 +155,34 @@ def straight(direction):
         left_wheels(backward)
         right_wheels(backward)
 
-# Stop
+
 def stop_motors():
     set_speed(0)
-    GPIO.output(AN11,GPIO.LOW)
-    GPIO.output(AN12,GPIO.LOW)
-    GPIO.output(BN11,GPIO.LOW)
-    GPIO.output(BN12,GPIO.LOW)
-    GPIO.output(AN21,GPIO.LOW)
-    GPIO.output(AN22,GPIO.LOW)
-    GPIO.output(BN21,GPIO.LOW)
-    GPIO.output(BN22,GPIO.LOW)
+    for pin in [AN11, AN12, BN11, BN12, AN21, AN22, BN21, BN22]:
+        GPIO.output(pin, GPIO.LOW)
+
 
 def read_message(msg):
     split_message = msg.split(" ")
     print(split_message)
-    global current_input; current_input = split_message[0]
+    global current_input;
+    current_input = split_message[0]
+
     if current_input == "dpad":
-        global dpad; dpad = tuple([int(direction) for direction in split_message[1:]])
+        global dpad;
+        dpad = tuple([int(direction) for direction in split_message[1:]])
     elif split_message[0] == "left_stick":
-        global left_stick_x; left_stick_x = float(split_message[1])
+        global left_stick_x;
+        left_stick_x = float(split_message[1])
     elif split_message[0] == "right_stick":
-        global right_stick_x; right_stick_x = float(split_message[1])
+        global right_stick_x;
+        right_stick_x = float(split_message[1])
     elif split_message[0] == "left_trigger":
-        global left_trigger; left_trigger = float(split_message[1])
+        global left_trigger;
+        left_trigger = float(split_message[1])
     elif split_message[0] == "right_trigger":
-        global right_trigger; right_trigger = float(split_message[1])
+        global right_trigger;
+        right_trigger = float(split_message[1])
     elif split_message[0] == "end":
         stop_motors()
         servo1.ChangeDutyCycle(7)
@@ -184,8 +193,9 @@ def read_message(msg):
         current_input = ""
         server.close()
 
+
 def move_motors():
-    # Omni-movement
+    # Omni-movement via D-Pad
     if current_input == "dpad":
         global previous_dpad
         if dpad != previous_dpad:
@@ -195,39 +205,40 @@ def move_motors():
         match dpad:
             case (0, 0):
                 stop_motors()
-            case (0, 1):  # Forward
+            case (0, 1):
                 straight(forward)
-            case (0, -1):  # Backward
+            case (0, -1):
                 straight(backward)
-            case (1, 0):  # Right
+            case (1, 0):
                 front_left(forward)
                 back_right(forward)
                 front_right(backward)
                 back_left(backward)
-            case (-1, 0):  # Left
+            case (-1, 0):
                 front_left(backward)
                 back_right(backward)
                 front_right(forward)
                 back_left(forward)
-            case (-1, -1):  # Back Left
+            case (-1, -1):
                 front_left(backward)
                 back_right(backward)
-            case (-1, 1):  # Front Left
+            case (-1, 1):
                 front_right(forward)
                 back_left(forward)
-            case (1, 1):  # Front Right
+            case (1, 1):
                 front_left(forward)
                 back_right(forward)
-            case (1, -1):  # Back Right
+            case (1, -1):
                 front_right(backward)
                 back_left(backward)
 
-    # Driving/Steering motor control
-    elif current_input == "left_trigger" or current_input == "right_trigger" or current_input == "left_stick":
+    # Driving / Steering motor control
+    elif current_input in ["left_trigger", "right_trigger", "left_stick"]:
         left_val = (left_trigger + 1) / 2
         right_val = (right_trigger + 1) / 2
         diff = right_val - left_val
-        if abs(diff) < 0.05:  # If stationary, turn in place
+
+        if abs(diff) < 0.05:  # Stationary turning in-place
             if left_stick_x != 0:
                 set_speed(abs(left_stick_x) * 100)
                 if left_stick_x > 0:
@@ -238,8 +249,7 @@ def move_motors():
                     right_wheels(forward)
             else:
                 stop_motors()
-
-        else:  # If moving, subtract speed from wheels to turn
+        else:  # Moving forward/backward with turning adjustments
             speed = abs(diff) * 100
             set_speed(speed)
             if diff < 0:
@@ -257,12 +267,13 @@ def move_motors():
 
     # Servo Control
     elif current_input == "right_stick":
-        global servo_angle; global last_servo_angle
+        global servo_angle, last_servo_angle
         servo_angle = servo_angle + (right_stick_x * 5)
         if servo_angle > 180:
             servo_angle = 180
         elif servo_angle < 0:
             servo_angle = 0
+
         if last_servo_angle != servo_angle:
             duty = servo_angle / 18 + 2
             servo1.ChangeDutyCycle(duty)
@@ -271,21 +282,18 @@ def move_motors():
         else:
             servo1.ChangeDutyCycle(0)
 
-    elif current_input == "take_picture":
-        now = datetime.now()
-        current_time = now.strftime("%Y%m%d%H%M%S")
-        picam2.capture_file(f"{current_time}.jpg")
 
+# --- MAIN CONTROL RECEIVE LOOP ---
 try:
     while True:
-        message, address = server.recvfrom(1024) # Decodes message
+        message, address = server.recvfrom(1024)
         server.sendto("Message Received".encode("utf-8"), address)
         message = message.decode("utf-8")
         read_message(message)
         move_motors()
-        if not message: # If connection closed, message not received
+        if not message:
             break
 finally:
     server.close()
+    picam2.stop_recording()
     print("end")
-
